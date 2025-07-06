@@ -1,4 +1,4 @@
-pip install discord.py-self
-pip install PyCharacterAI
-pip install asyncio
-pip install aiohttp
+discord.py-self
+PyCharacterAI
+asyncio
+aiohttp
