@@ -61,7 +61,7 @@ async def initialize_character_ai():
         print(f"Initialization failed: {str(e)}")
         raise
 
-class MyClient(discord.Client):
+class cClient(discord.Client):
     async def on_ready(self):
         print(f"\nlogged in as {self.user} (ID: {self.user.id})")
         print(f"Connected to {len(self.guilds)} servers:")
@@ -101,7 +101,7 @@ class MyClient(discord.Client):
         except Exception as e:
             print(f"Unexpected error in message handling: {str(e)}")
 
-client = MyClient()
+client = cClient()
 
 async def shutdown():
     print("\nShutdown initiated...")
