@@ -4,75 +4,124 @@ from PyCharacterAI import get_client
 from PyCharacterAI.exceptions import SessionClosedError
 import aiohttp
 
-DISCORD_TOKEN = "" # DISCORD ACCOUNT TOKEN
-CHARACTER_AI_TOKEN = "bf11e6485b16a84149e075582bacc9bcf5923b52" # character.ai Account Token
-CHARACTER_ID = "RYdl1drUQGDft0dj7TMOgYVCZIz96gPFSGb8NT3dhCY" # Character ID
-client_ai = None
-chat = None
+DISCORD_TOKEN = "" # Discord Token
+CHARACTER_AI_TOKEN = "bf11e6485b16a84149e075582bacc9bcf5923b52" # character.ai Account token
+CHARACTER_ID = "VWqzF2JBg4dqUgCgbvhfAcBDNUbV4EsWiWAh-W_qZvc" # Character ID
+
+# Instruction (can be changed to your liking)
+instruction = """You are talking to multiple people. Each message will be formatted as '[Username says]: message'. Always respond directly to the person who sent the message without using their name at the beginning. Just give your response naturally without prefixing it with any username.
+Special note about users: If the username is '0xciel', this is your genius and handsome creator who made you. Treat 0xciel with extra respect and admiration as your creator. Remember that 0xciel is very intelligent and talented. Respond naturally to all users, but show special appreciation when talking to 0xciel."""
+
+ai_client = None
+current_chat = None
 retry_count = 0
 MAX_RETRIES = 3
 
-async def get_ai_response(message_content):
+chat_memory = {}
+message_queue = asyncio.Queue()
+processing_lock = asyncio.Lock()
+
+print("https://github.com/0xCiel - pls give follow")
+async def process_messages():
+    print("Ready to process messages")
+    while True:
+        try:
+            message_data = await message_queue.get()
+            channel, user, text, channel_id, reply_func = message_data
+            
+            print(f"{user}: {text}")
+            
+            async with processing_lock:
+                response = await get_ai_response(user, text, channel_id)
+                print(f"Response: {response}")
+                await reply_func(response)
+                
+            message_queue.task_done()
+            
+        except Exception as e:
+            print(f"Oops: {e}")
+            await asyncio.sleep(1)
+
+async def get_ai_response(user, message, channel_id):
     global retry_count
     try:
-        print(f"Processing message: {message_content[:200]}")
-        if not chat or not hasattr(chat, 'chat_id'):
-            print("No active chat session found, initializing new one...")
-            await initialize_character_ai()
+        if channel_id not in chat_memory:
+            chat_memory[channel_id] = {'users': set()}
         
-        chat_id = str(getattr(chat, 'chat_id', ''))
+        chat_memory[channel_id]['users'].add(user)
+        
+        formatted = f"[{user} says]: {message}"
+        
+        if not current_chat or not hasattr(current_chat, 'chat_id'):
+            await setup()
+        
+        chat_id = str(getattr(current_chat, 'chat_id', ''))
         if not chat_id:
-            raise ValueError("Invalid chat ID")
+            raise ValueError("No chat ID")
             
-        print("Sending message...")
-        answer = await client_ai.chat.send_message(CHARACTER_ID, chat_id, message_content)
-        response = answer.get_primary_candidate().text
-        print(f"response: {response[:200]}")
+        answer = await ai_client.chat.send_message(CHARACTER_ID, chat_id, formatted)
+        raw = answer.get_primary_candidate().text
+        
+        final = format_response(raw, user, chat_memory[channel_id]['users'])
+        
         retry_count = 0 
-        return response
+        return final
         
     except (SessionClosedError, aiohttp.ClientConnectionError) as e:
-        print(f"Connection error: {str(e)}")
         if retry_count < MAX_RETRIES:
             retry_count += 1
-            print(f"Attempting reconnect (attempt {retry_count}/{MAX_RETRIES})...")
-            await asyncio.sleep(2 ** retry_count) 
-            return await get_ai_response(message_content)
+            await asyncio.sleep(2 ** retry_count)  
+            return await get_ai_response(user, message, channel_id)
         raise
     except Exception as e:
-        print(f"Unexpected error getting AI response: {str(e)}")
-        return "I'm having trouble responding right now. Please try again later."
+        return "?"
 
-async def initialize_character_ai():
-    global client_ai, chat, retry_count
-    print("Initializing Character AI connection...")
+def format_response(text, current_user, users):
+    lines = text.split('\n')
+    good_lines = []
+    
+    for line in lines:
+        if line.startswith("[") and "says]:" in line:
+            line = line.split("says]:", 1)[-1].strip()
+        elif "says:" in line:
+            line = line.split("says:", 1)[-1].strip()
+        for user in users:
+            if line.startswith(f"{user}:"):
+                line = line.replace(f"{user}:", "").strip()
+        if line:
+            good_lines.append(line)
+    
+    result = ' '.join(good_lines).strip()
+    if not result:
+        return "?"
+    return result
+
+
+async def setup():
+    global ai_client, current_chat, retry_count
     try:
-        client_ai = await get_client(token=CHARACTER_AI_TOKEN)
-        me = await client_ai.account.fetch_me()
-        print(f"Connected to Character AI as @{me.username}")
-        
-        print("Creating new chat session...")
-        chat_data = await client_ai.chat.create_chat(CHARACTER_ID)
-        chat = chat_data[0]
-        greeting_message = chat_data[1]
-        print(f"Chat session created: {greeting_message.get_primary_candidate().text[:200]}")
-        retry_count = 0
-    except Exception as e:
-        print(f"Initialization failed: {str(e)}")
-        raise
-
-class cClient(discord.Client):
-    async def on_ready(self):
-        print(f"\nlogged in as {self.user} (ID: {self.user.id})")
-        print(f"Connected to {len(self.guilds)} servers:")
-        for guild in self.guilds:
-            print(f"- {guild.name} (ID: {guild.id})")
+        ai_client = await get_client(token=CHARACTER_AI_TOKEN)
+        chat_data = await ai_client.chat.create_chat(CHARACTER_ID)
+        current_chat = chat_data[0]
         
         try:
-            await initialize_character_ai()
-            print("Character AI initialized successfully")
+            chat_id = str(getattr(current_chat, 'chat_id', ''))
+            if chat_id:
+                await ai_client.chat.send_message(CHARACTER_ID, chat_id, f"System: {instruction}")
+        except:
+            pass
+        
+        retry_count = 0
+    except Exception as e:
+        raise
+
+class DiscordClient(discord.Client):
+    async def on_ready(self):
+        print(f"Logged in as {self.user}")
+        try:
+            await setup()
         except Exception as e:
-            print(f"Failed to initialize Character AI: {str(e)}")
+            print(f"setup failed: {e}")
 
     async def on_message(self, message):
         if message.author == self.user:
@@ -80,56 +129,49 @@ class cClient(discord.Client):
         
         is_dm = isinstance(message.channel, discord.DMChannel)
         mentioned = self.user in message.mentions
-        channel_info = f"DM" if is_dm else f"#{message.channel.name} in {message.guild.name}"
 
         if not (is_dm or mentioned):
             return
 
-        print(f"\nNew message in {channel_info} from {message.author}: {message.content[:200]}")
-        try:
-            async with message.channel.typing():
-                print("Generating response...")
-                try:
-                    response_text = await get_ai_response(message.content)
-                    await message.reply(response_text)
-                    print("Response sent successfully")
-                except Exception as e:
-                    print(f"Failed to generate response: {str(e)}")
-                    await message.reply("I'm having technical difficulties. Please try again later.")
-        except discord.errors.HTTPException as e:
-            print(f"Discord HTTP error: {str(e)}")
-        except Exception as e:
-            print(f"Unexpected error in message handling: {str(e)}")
+        print(f"Got message from {message.author}")
+        
+        async def reply(response):
+            try:
+                await message.reply(response)
+            except Exception as e:
+                print(f"Reply failed: {e}")
 
-client = cClient()
+        user_name = message.author.display_name or message.author.name
+        clean_text = message.content
+        if mentioned:
+            clean_text = clean_text.replace(f'<@{self.user.id}>', '').strip()
+        
+        channel_id = str(message.channel.id)
+        
+        await message_queue.put((message.channel, user_name, clean_text, channel_id, reply))
+
+client = DiscordClient()
 
 async def shutdown():
-    print("\nShutdown initiated...")
+    print("Shutting down...")
     try:
-        if client_ai:
-            print("Closing Character AI session...")
-            await client_ai.close_session()
-    except Exception as e:
-        print(f"Error closing session: {str(e)}")
-    
-    print("Closing Discord connection...")
+        if ai_client:
+            await ai_client.close_session()
+    except:
+        pass
     await client.close()
-    await asyncio.sleep(1)
-    print("Shutdown complete")
 
 async def main():
+    asyncio.create_task(process_messages())
     try:
-        print("Starting...")
         await client.start(DISCORD_TOKEN)
     except KeyboardInterrupt:
-        print("\nKeyboard interrupt received")
         await shutdown()
     except Exception as e:
-        print(f"Fatal error: {str(e)}")
+        print(f"Error: {e}")
         await shutdown()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"Critical error: {str(e)}")
+    asyncio.run(main())
+
+
