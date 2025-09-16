@@ -4,3 +4,10 @@ how to use:
 3. put your c.ai account token in line 8 or you can use one I provided there alerady
 4. Enter your character ID in line 9; you can get character id in https://character.ai/
 ![image](https://github.com/user-attachments/assets/430b9ea9-c28a-4c6a-a4fe-57a6260fa743)
+
+
+# Update Logs
+## 0.0.1
+* Added `Multiple user support`
+* Added `Custom Instruction`
+* Improvement to replies - it will now accurately reply to the correct person if the chat is going too fast
